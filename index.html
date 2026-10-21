@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小小小程序员 · 迷宫闯关</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <!-- 档案选择页 -->
+  <section id="screen-profiles" class="screen">
+    <div class="profiles-title" id="logo-slot"></div>
+    <div id="profile-list" class="profile-list"></div>
+  </section>
+
+  <!-- 关卡地图页 -->
+  <section id="screen-map" class="screen hidden">
+    <header class="map-header">
+      <button id="btn-home" class="icon-btn" title=""></button>
+      <div id="map-avatar" class="map-avatar"></div>
+    </header>
+    <div id="map-board" class="map-board"></div>
+  </section>
+
+  <!-- 游戏页 -->
+  <section id="screen-game" class="screen hidden">
+    <header class="game-header">
+      <button id="btn-back-map" class="icon-btn"></button>
+      <div id="game-levelno" class="game-levelno"></div>
+      <div id="game-goal" class="game-goal"></div>
+      <button id="btn-info" class="icon-btn info-btn" title="家长查看本关教学点"></button>
+    </header>
+    <div id="parent-note" class="parent-note hidden"></div>
+    <div class="game-main">
+      <div id="blockly-area" class="blockly-area">
+        <div id="blocklyDiv"></div>
+      </div>
+      <div class="right-area">
+        <div id="mazeWrap" class="maze-wrap"></div>
+        <div class="control-bar">
+          <button id="btn-reset" class="ctrl-btn reset-btn"></button>
+          <button id="btn-run" class="ctrl-btn run-btn"></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 过关庆祝弹层 -->
+  <div id="win-overlay" class="overlay hidden">
+    <div class="win-card">
+      <div id="win-stars" class="win-stars"></div>
+      <div class="win-btns">
+        <button id="btn-win-replay" class="icon-btn big"></button>
+        <button id="btn-win-next" class="icon-btn big"></button>
+        <button id="btn-win-home" class="icon-btn big"></button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 工具生成的临时校验脚本
+tools/_check.mjs
+
+# 开发调试过程中产生的截图
+/_*.png
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
