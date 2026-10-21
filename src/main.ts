@@ -20,6 +20,7 @@ let workspace: Blockly.WorkspaceSvg | null = null;
 let renderer: MazeRenderer | null = null;
 let curLevel: LevelDef | null = null;
 let running = false;
+let lastMapCols = -1; // 上次渲染地图时采用的断点列数，用于 resize 仅在跨断点时重排
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 function showScreen(name: 'profiles' | 'map' | 'game') {
@@ -60,7 +61,12 @@ function renderMap() {
   $('map-avatar').textContent = cur.avatar;
   const board = $('map-board'); board.innerHTML = '';
   const byId = new Map<number, LevelDef>(LEVELS.map((lv) => [lv.id, lv]));
-  const NODE = 92, GX = 40, GY = 46; // 节点直径 / 列间距 / 行间距（行距留空给星级）
+  // 节点尺寸/间距/每章列数来自 CSS 变量，随断点变化；媒体查询与这里共用同一真源
+  const css = getComputedStyle(document.documentElement);
+  const px = (name: string, dflt: number) => { const v = parseFloat(css.getPropertyValue(name)); return Number.isFinite(v) ? v : dflt; };
+  const NODE = px('--node', 92), GX = px('--gx', 40), GY = px('--gy', 46);
+  const MAXCOLS = Math.max(1, Math.round(px('--maxcols', 5)));
+  lastMapCols = MAXCOLS; // 记录当前断点列数，供 resize 判断是否需要重排
   const svgns = 'http://www.w3.org/2000/svg';
   // 每章一张卡片；章内关卡沿蛇形小径排列，颜色由绿→红体现“由简入难”
   for (const ch of CHAPTERS) {
@@ -68,7 +74,7 @@ function renderMap() {
     for (let id = ch.from; id <= ch.to; id++) { const lv = byId.get(id); if (lv) lvs.push(lv); }
     const count = lvs.length;
     // 均衡每行数量，避免“8+1”孤行：先定上限列数，再按行数回推列数
-    let cols = Math.min(5, count);
+    let cols = Math.min(MAXCOLS, count);
     cols = Math.ceil(count / Math.ceil(count / cols));
     const rows = Math.ceil(count / cols);
 
@@ -171,7 +177,7 @@ function openLevel(lv: LevelDef) {
     trashcan: true,
     zoom: { startScale: 1.15, maxScale: 1.5, minScale: 0.6 },
     move: { scrollbars: true, drag: true, wheel: true },
-    grid: { spacing: 24, length: 3, colour: '#eee', snap: true },
+    grid: { spacing: 24, length: 3, colour: '#eee', snap: false }, // 不吸附网格：保证从工具箱拖出可直接拼接
   });
   if (lv.mode === 'debug' && lv.brokenProgram) placeSpec(workspace, lv.brokenProgram);
   workspace.render();
@@ -182,26 +188,38 @@ function openLevel(lv: LevelDef) {
 }
 
 function resetLevel() {
-  if (!curLevel || !workspace) return;
+  if (!curLevel || !workspace || running) return; // 运行中忽略重置，避免打断动画/销毁正在执行的积木
   workspace.clear();
   if (curLevel.mode === 'debug' && curLevel.brokenProgram) placeSpec(workspace, curLevel.brokenProgram);
   const state = parseRows(curLevel.rows, curLevel.startDir);
   renderer?.layout(state);
 }
 
+/** 运行期间锁定 Blockly 编辑（含工具箱拖拽），避免中途改积木打断动画、或拖拽未拼上导致再运行错乱 */
+function setWorkspaceEditable(on: boolean) {
+  const div = workspace?.getInjectionDiv?.();
+  if (div) div.style.pointerEvents = on ? '' : 'none';
+}
+
 async function doRun() {
   if (!workspace || !renderer || !curLevel || running) return;
   running = true; $('btn-run').classList.add('running');
-  // 每次运行重置迷宫到初始态并重绘
-  const state = parseRows(curLevel.rows, curLevel.startDir);
-  renderer.layout(state);
-  const ex = new Executor(workspace, state, renderer, sfx, {
-    onBlockSound: (t) => { const k = CONCEPT_VOICE[t]; if (k) sfx.speak(k); },
-  });
-  const outcome: Outcome = await ex.run();
-  running = false; $('btn-run').classList.remove('running');
-  workspace.highlightBlock(null as unknown as string);
-  handleOutcome(outcome, state);
+  setWorkspaceEditable(false); // 运行期间锁定编辑
+  try {
+    // 每次运行重置迷宫到初始态并重绘
+    const state = parseRows(curLevel.rows, curLevel.startDir);
+    renderer.layout(state);
+    const ex = new Executor(workspace, state, renderer, sfx, {
+      onBlockSound: (t) => { const k = CONCEPT_VOICE[t]; if (k) sfx.speak(k); },
+    });
+    const outcome: Outcome = await ex.run();
+    workspace.highlightBlock(null as unknown as string);
+    handleOutcome(outcome, state);
+  } finally {
+    // 无论正常结束或意外抛错，都必须复位运行标志并解锁编辑，避免“再也不能点运行”
+    running = false; $('btn-run').classList.remove('running');
+    setWorkspaceEditable(true);
+  }
 }
 
 function handleOutcome(outcome: Outcome, state: MazeState) {
@@ -292,12 +310,30 @@ function wireEvents() {
 }
 
 function boot() {
+  // 放大连接磁吸半径（默认 28），让 5-7 岁孩子手不够稳也能把积木直接拼上
+  Blockly.config.snapRadius = 40;
+  Blockly.config.connectingSnapRadius = 40;
   defineBlocks();
   paintIcons();
   wireEvents();
   renderProfiles();
   if (store.currentProfile()) { renderMap(); showScreen('map'); }
   else showScreen('profiles');
+  // 尺寸/转屏变化：工作区重新测量适配；地图仅在跨断点（列数变化）时重排，避免手机地址栏伸缩频繁重建丢失滚动
+  let resizeTimer: number | undefined;
+  const onResize = () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      workspace?.resize();
+      const mapVisible = !$('screen-map').classList.contains('hidden');
+      if (!mapVisible) return;
+      const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--maxcols'));
+      const cols = Number.isFinite(v) ? Math.max(1, Math.round(v)) : 5;
+      if (cols !== lastMapCols) renderMap();
+    }, 160);
+  };
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
   // 关卡自检（开发期在控制台报警）
   import('./levels').then((m) => { const e = m.checkLevels(); if (e.length) console.error('关卡校验:', e); });
 }
